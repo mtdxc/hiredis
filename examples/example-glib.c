@@ -17,11 +17,23 @@ void handle_signal(int signum){
     redis = NULL;
   }
 }
+
+static void schedule_timer(int msec, GSourceFunc func, void* userdata){
+	GSource *timeout_source = g_timeout_source_new(msec);
+	g_source_set_callback(timeout_source, func, userdata, NULL);
+	g_source_attach(timeout_source, context);
+	g_source_unref(timeout_source);
+}
+
 void redis_connect();
+static gboolean timeout_reconnect(gpointer user_data){
+  if(!stop)
+    redis_connect();
+  return G_SOURCE_REMOVE; //G_SOURCE_CONTINUE;
+}
 static void subscribe_cb(redisAsyncContext *ac,
            gpointer r,
            gpointer user_data);
-
 static void
 connect_cb (const redisAsyncContext *ac, int status)
 {
@@ -31,7 +43,7 @@ connect_cb (const redisAsyncContext *ac, int status)
         if(ac == redis)
           redis = NULL;
         if(!stop)
-          redis_connect();
+          schedule_timer(1000, timeout_reconnect, NULL);
     } else {
         printf("redis Connected...\n");
         redisAsyncCommand(ac, subscribe_cb, NULL, "subscribe talk");
@@ -46,7 +58,7 @@ disconnect_cb (const redisAsyncContext *ac G_GNUC_UNUSED,
     if (status != REDIS_OK) {
         printf("redis disconnect: %s\n", ac->errstr);
         if(!stop)
-          redis_connect();
+          schedule_timer(1000, timeout_reconnect, NULL);
     } else {
         printf("redis Disconnected...\n");
         //g_main_loop_quit(mainloop);
